@@ -1,29 +1,50 @@
-import { useMemo, useState } from "react";
-import FileUpload from "./components/FileUpload.jsx";
+import { useEffect, useMemo, useState } from "react";
 import QuestionCard from "./components/QuestionCard.jsx";
 import ReviewControls from "./components/ReviewControls.jsx";
 import SelectedList from "./components/SelectedList.jsx";
 import Summary from "./components/Summary.jsx";
+import { parseProverbCsv, shuffle } from "./utils/parseCsv.js";
+// The dataset ships with the app; it is read from the repo at build time so the
+// reviewer does not have to upload anything.
+import datasetCsv from "../csv_files/finaldataset.csv?raw";
 
 export default function App() {
-  const [stage, setStage] = useState("upload"); // "upload" | "review" | "done"
+  const [stage, setStage] = useState("loading"); // "loading" | "review" | "done" | "error"
   const [rows, setRows] = useState([]);
   const [index, setIndex] = useState(0);
   const [confirmed, setConfirmed] = useState([]);
   const [declinedKeys, setDeclinedKeys] = useState([]);
   const [warnings, setWarnings] = useState([]);
+  const [loadError, setLoadError] = useState(null);
 
   const current = rows[index];
   const confirmedCount = confirmed.length;
 
-  function handleLoaded(loadedRows, loadErrors) {
-    setRows(loadedRows);
-    setWarnings(loadErrors ?? []);
-    setIndex(0);
-    setConfirmed([]);
-    setDeclinedKeys([]);
-    setStage("review");
-  }
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { rows: loadedRows, errors } = await parseProverbCsv(datasetCsv);
+      if (cancelled) return;
+      if (loadedRows.length === 0) {
+        setLoadError(
+          errors.length ? errors.join(" ") : "No valid rows found in the dataset."
+        );
+        setStage("error");
+        return;
+      }
+      // Present the question/answer pairs in a random order rather than the
+      // fixed order they appear in the CSV.
+      setRows(shuffle(loadedRows));
+      setWarnings(errors ?? []);
+      setIndex(0);
+      setConfirmed([]);
+      setDeclinedKeys([]);
+      setStage("review");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function advance() {
     if (index + 1 >= rows.length) {
@@ -63,12 +84,11 @@ export default function App() {
   }
 
   function handleRestart() {
-    setStage("upload");
-    setRows([]);
+    if (rows.length > 0) setRows((prev) => shuffle(prev));
     setIndex(0);
     setConfirmed([]);
     setDeclinedKeys([]);
-    setWarnings([]);
+    setStage(rows.length > 0 ? "review" : "loading");
   }
 
   const warningBanner = useMemo(() => {
@@ -81,8 +101,29 @@ export default function App() {
     );
   }, [warnings]);
 
-  if (stage === "upload") {
-    return <FileUpload onLoaded={handleLoaded} />;
+  if (stage === "loading") {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center px-4 text-center">
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+          Nepali Proverb Validator
+        </h1>
+        <p className="mt-3 text-slate-600">Loading proverbs…</p>
+      </div>
+    );
+  }
+
+  if (stage === "error") {
+    return (
+      <div className="mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center px-4 text-center">
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+          Nepali Proverb Validator
+        </h1>
+        <div className="mt-6 w-full rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <p className="mb-1 font-semibold">Could not load the dataset:</p>
+          <p>{loadError}</p>
+        </div>
+      </div>
+    );
   }
 
   if (stage === "done") {
@@ -106,7 +147,7 @@ export default function App() {
             onClick={handleRestart}
             className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100"
           >
-            New file
+            Restart
           </button>
         </div>
       </header>
