@@ -33,6 +33,10 @@ jobs:
         # base path is derived from the repository name so the app works at
         # https://<user>.github.io/<repo>/ without manual edits.
         run: BASE_PATH="/${GITHUB_REPOSITORY#*/}/" npm run build
+        env:
+          VITE_GH_REPO: ${{ github.repository }}
+          VITE_GH_TOKEN: ${{ secrets.GH_SYNC_TOKEN }}
+          VITE_GH_BRANCH: data
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

@@ -1,12 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import QuestionCard from "./components/QuestionCard.jsx";
 import ReviewControls from "./components/ReviewControls.jsx";
 import SelectedList from "./components/SelectedList.jsx";
 import Summary from "./components/Summary.jsx";
 import { parseProverbCsv, shuffle } from "./utils/parseCsv.js";
+import { commitSelectedAnswers, isSyncEnabled } from "./utils/githubSync.js";
 // The dataset ships with the app; it is read from the repo at build time so the
 // reviewer does not have to upload anything.
 import datasetCsv from "../csv_files/finaldataset.csv?raw";
+
+const SAVE_INTERVAL_MS = 90 * 1000;
+
+// One stable session id per browser tab session; a reload keeps the same file,
+// a new tab/session gets its own file.
+function getSessionId() {
+  const KEY = "npv-session-id";
+  let id = sessionStorage.getItem(KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    sessionStorage.setItem(KEY, id);
+  }
+  return id;
+}
 
 export default function App() {
   const [stage, setStage] = useState("loading"); // "loading" | "review" | "done" | "error"
@@ -19,6 +34,65 @@ export default function App() {
 
   const current = rows[index];
   const confirmedCount = confirmed.length;
+
+  // --- Background sync of confirmed rows to GitHub every 90s ---
+  const sessionIdRef = useRef(null);
+  const confirmedRef = useRef(confirmed);
+  const syncStateRef = useRef({ sha: undefined, content: undefined });
+  const syncingRef = useRef(false);
+
+  confirmedRef.current = confirmed;
+
+  useEffect(() => {
+    if (!isSyncEnabled()) return;
+    sessionIdRef.current = getSessionId();
+
+    async function save() {
+      if (syncingRef.current) return; // avoid overlapping requests
+      syncingRef.current = true;
+      try {
+        const next = await commitSelectedAnswers({
+          sessionId: sessionIdRef.current,
+          rows: confirmedRef.current,
+          lastSha: syncStateRef.current.sha,
+          lastContent: syncStateRef.current.content,
+        });
+        syncStateRef.current = next;
+      } catch (err) {
+        console.warn("Selected-answers sync failed:", err);
+      } finally {
+        syncingRef.current = false;
+      }
+    }
+
+    const timer = setInterval(save, SAVE_INTERVAL_MS);
+    const onUnload = () => {
+      save();
+    };
+    window.addEventListener("beforeunload", onUnload);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("beforeunload", onUnload);
+      // Best-effort final save when unmounting.
+      save();
+    };
+  }, []);
+
+  // Trigger a save as soon as the review is finished.
+  useEffect(() => {
+    if (stage !== "done" || !isSyncEnabled()) return;
+    commitSelectedAnswers({
+      sessionId: sessionIdRef.current ?? getSessionId(),
+      rows: confirmedRef.current,
+      lastSha: syncStateRef.current.sha,
+      lastContent: syncStateRef.current.content,
+    })
+      .then((next) => {
+        syncStateRef.current = next;
+      })
+      .catch((err) => console.warn("Selected-answers sync failed:", err));
+  }, [stage]);
 
   useEffect(() => {
     let cancelled = false;

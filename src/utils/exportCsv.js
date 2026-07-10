@@ -1,9 +1,10 @@
 import Papa from "papaparse";
 import { ALL_COLUMNS } from "./parseCsv.js";
 
-// Serialize confirmed rows back to the original CSV schema and trigger a
-// download. A UTF-8 BOM is prepended so Excel renders Devanagari correctly.
-export function downloadConfirmedCsv(rows, filename = "confirmed-proverbs.csv") {
+// Serialize confirmed rows back to the original CSV schema. A UTF-8 BOM is
+// prepended so Excel renders Devanagari correctly. Shared by the download and
+// the GitHub sync so both produce identical output.
+export function serializeConfirmedCsv(rows) {
   const data = rows.map((r) => ({
     id: r.id,
     proverb: r.proverb,
@@ -15,7 +16,14 @@ export function downloadConfirmedCsv(rows, filename = "confirmed-proverbs.csv") 
   }));
 
   const csv = Papa.unparse({ fields: ALL_COLUMNS, data });
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  return "\uFEFF" + csv;
+}
+
+// Serialize confirmed rows and trigger a browser download.
+export function downloadConfirmedCsv(rows, filename = "confirmed-proverbs.csv") {
+  const blob = new Blob([serializeConfirmedCsv(rows)], {
+    type: "text/csv;charset=utf-8;",
+  });
 
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
