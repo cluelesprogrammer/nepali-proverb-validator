@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import QuestionCard from "./components/QuestionCard.jsx";
 import ReviewControls from "./components/ReviewControls.jsx";
 import SelectedList from "./components/SelectedList.jsx";
+import CategoryProgress from "./components/CategoryProgress.jsx";
 import Summary from "./components/Summary.jsx";
 import { parseProverbCsv, shuffle } from "./utils/parseCsv.js";
 import { commitSelectedAnswers, isSyncEnabled } from "./utils/githubSync.js";
 // The dataset ships with the app; it is read from the repo at build time so the
-// reviewer does not have to upload anything.
-import datasetCsv from "../csv_files/finaldataset.csv?raw";
+// reviewer does not have to upload anything. We use a category-balanced subset
+// (150 proverbs per category, plus all of the small Nature and Environment set)
+// rather than the full finaldataset.
+import datasetCsv from "../csv_files/balanced_dataset.csv?raw";
 
 const SAVE_INTERVAL_MS = 90 * 1000;
 
@@ -165,6 +168,28 @@ export default function App() {
     setStage(rows.length > 0 ? "review" : "loading");
   }
 
+  // Per-category running counts: how many proverbs exist in the loaded dataset
+  // vs. how many the reviewer has confirmed so far.
+  const categoryStats = useMemo(() => {
+    const totals = new Map();
+    for (const row of rows) {
+      const cat = row.category || "Uncategorized";
+      totals.set(cat, (totals.get(cat) ?? 0) + 1);
+    }
+    const confirmedByCat = new Map();
+    for (const row of confirmed) {
+      const cat = row.category || "Uncategorized";
+      confirmedByCat.set(cat, (confirmedByCat.get(cat) ?? 0) + 1);
+    }
+    return Array.from(totals.entries())
+      .map(([category, total]) => ({
+        category,
+        total,
+        confirmed: confirmedByCat.get(category) ?? 0,
+      }))
+      .sort((a, b) => b.total - a.total || a.category.localeCompare(b.category));
+  }, [rows, confirmed]);
+
   const warningBanner = useMemo(() => {
     if (warnings.length === 0) return null;
     return (
@@ -206,6 +231,7 @@ export default function App() {
         confirmed={confirmed}
         declinedCount={declinedKeys.length}
         total={rows.length}
+        categoryStats={categoryStats}
         onRemove={handleRemove}
         onRestart={handleRestart}
       />
@@ -241,8 +267,11 @@ export default function App() {
           />
         </section>
 
-        <aside className="h-[32rem] lg:sticky lg:top-6 lg:h-[calc(100vh-6rem)]">
-          <SelectedList confirmed={confirmed} onRemove={handleRemove} />
+        <aside className="flex flex-col gap-4 lg:sticky lg:top-6">
+          <CategoryProgress stats={categoryStats} totalConfirmed={confirmedCount} />
+          <div className="h-[32rem]">
+            <SelectedList confirmed={confirmed} onRemove={handleRemove} />
+          </div>
         </aside>
       </main>
     </div>

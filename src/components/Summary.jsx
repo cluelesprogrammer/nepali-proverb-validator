@@ -1,7 +1,15 @@
 import { downloadConfirmedCsv } from "../utils/exportCsv.js";
 import SelectedList from "./SelectedList.jsx";
+import CategoryProgress from "./CategoryProgress.jsx";
 
-export default function Summary({ confirmed, declinedCount, total, onRemove, onRestart }) {
+export default function Summary({
+  confirmed,
+  declinedCount,
+  total,
+  categoryStats,
+  onRemove,
+  onRestart,
+}) {
   return (
     <div className="mx-auto max-w-3xl px-4 py-10">
       <div className="rounded-2xl bg-white p-8 text-center shadow-sm">
@@ -46,6 +54,12 @@ export default function Summary({ confirmed, declinedCount, total, onRemove, onR
           </button>
         </div>
       </div>
+
+      {categoryStats && categoryStats.length > 0 && (
+        <div className="mt-6">
+          <CategoryProgress stats={categoryStats} totalConfirmed={confirmed.length} />
+        </div>
+      )}
 
       <div className="mt-6 h-[28rem]">
         <SelectedList confirmed={confirmed} onRemove={onRemove} />
