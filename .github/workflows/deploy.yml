@@ -3,6 +3,10 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+    # Confirmed-answer syncs commit to jobs/** on main; those data-only commits
+    # should not trigger a rebuild/redeploy of the site.
+    paths-ignore:
+      - "jobs/**"
   workflow_dispatch:
 
 permissions:
@@ -36,7 +40,7 @@ jobs:
         env:
           VITE_GH_REPO: ${{ github.repository }}
           VITE_GH_TOKEN: ${{ secrets.GH_SYNC_TOKEN }}
-          VITE_GH_BRANCH: data
+          VITE_GH_BRANCH: main
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

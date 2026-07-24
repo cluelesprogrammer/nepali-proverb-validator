@@ -4,6 +4,7 @@ import ReviewControls from "./components/ReviewControls.jsx";
 import SelectedList from "./components/SelectedList.jsx";
 import CategoryProgress from "./components/CategoryProgress.jsx";
 import Summary from "./components/Summary.jsx";
+import JobsViewer from "./components/JobsViewer.jsx";
 import { parseProverbCsv, shuffle } from "./utils/parseCsv.js";
 import { commitSelectedAnswers, isSyncEnabled } from "./utils/githubSync.js";
 // The dataset ships with the app; it is read from the repo at build time so the
@@ -26,7 +27,13 @@ function getSessionId() {
   return id;
 }
 
+function readViewFromHash() {
+  if (typeof window === "undefined") return "review";
+  return window.location.hash.replace(/^#\/?/, "") === "jobs" ? "jobs" : "review";
+}
+
 export default function App() {
+  const [view, setView] = useState(readViewFromHash); // "review" | "jobs"
   const [stage, setStage] = useState("loading"); // "loading" | "review" | "done" | "error"
   const [rows, setRows] = useState([]);
   const [index, setIndex] = useState(0);
@@ -37,6 +44,19 @@ export default function App() {
 
   const current = rows[index];
   const confirmedCount = confirmed.length;
+
+  // Keep the active view in sync with the URL hash so a view is shareable and
+  // survives reloads (#jobs shows the jobs viewer, anything else is review).
+  useEffect(() => {
+    const onHash = () => setView(readViewFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  function goToView(next) {
+    window.location.hash = next === "jobs" ? "jobs" : "";
+    setView(next);
+  }
 
   // --- Background sync of confirmed rows to GitHub every 90s ---
   const sessionIdRef = useRef(null);
@@ -200,6 +220,35 @@ export default function App() {
     );
   }, [warnings]);
 
+  if (view === "jobs") {
+    return (
+      <div className="min-h-screen">
+        <header className="border-b border-slate-200 bg-white">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+            <h1 className="text-lg font-bold text-slate-900">Nepali Proverb Validator</h1>
+            <nav className="flex items-center gap-1">
+              <button
+                onClick={() => goToView("review")}
+                className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100"
+              >
+                Review
+              </button>
+              <button
+                onClick={() => goToView("jobs")}
+                className="rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-800"
+              >
+                Jobs
+              </button>
+            </nav>
+          </div>
+        </header>
+        <main className="px-4 py-6">
+          <JobsViewer />
+        </main>
+      </div>
+    );
+  }
+
   if (stage === "loading") {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center px-4 text-center">
@@ -243,12 +292,20 @@ export default function App() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <h1 className="text-lg font-bold text-slate-900">Nepali Proverb Validator</h1>
-          <button
-            onClick={handleRestart}
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100"
-          >
-            Restart
-          </button>
+          <nav className="flex items-center gap-1">
+            <button
+              onClick={() => goToView("jobs")}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100"
+            >
+              Jobs
+            </button>
+            <button
+              onClick={handleRestart}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100"
+            >
+              Restart
+            </button>
+          </nav>
         </div>
       </header>
 
