@@ -5,7 +5,10 @@ import { serializeConfirmedCsv } from "./exportCsv.js";
 // no-op so the app still runs normally.
 const REPO = import.meta.env.VITE_GH_REPO; // "owner/repo"
 const TOKEN = import.meta.env.VITE_GH_TOKEN;
-const BRANCH = import.meta.env.VITE_GH_BRANCH || "data";
+// Confirmed answers are synced straight to the deployment branch (main by
+// default) so all collected data lives in one place. Override with
+// VITE_GH_BRANCH if you ever need to point the sync elsewhere.
+const BRANCH = import.meta.env.VITE_GH_BRANCH || "main";
 
 const API = "https://api.github.com";
 
@@ -75,7 +78,7 @@ async function ensureBranch() {
 }
 
 // Commit the confirmed rows to jobs/{sessionId}/selected_answers.csv on the
-// data branch. Returns { sha, content } to cache for the next call so we can
+// sync branch (main by default). Returns { sha, content } to cache for the next call so we can
 // (a) skip unchanged saves and (b) supply the sha required to update the file.
 export async function commitSelectedAnswers({
   sessionId,
