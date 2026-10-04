@@ -1,0 +1,89 @@
+---
+description: How confirmed-answer CSVs sync to GitHub main, and how to debug/rotate it when sync silently stops
+globs: src/utils/githubSync.js,src/utils/githubJobs.js,src/App.jsx,.github/workflows/deploy.yml,jobs/**
+alwaysApply: false
+---
+
+# GitHub CSV sync architecture
+
+This is a **100% client-side, static Vite/React app** deployed to GitHub Pages.
+There is no server and no CI script performing the sync — `src/utils/githubSync.js`
+runs **in the visitor's browser** and PUTs CSV content straight to GitHub's
+Contents API.
+
+## Flow
+
+1. **Build time** (`.github/workflows/deploy.yml:40-43`): Vite build step injects
+   `VITE_GH_REPO=${{ github.repository }}`, `VITE_GH_TOKEN=${{ secrets.GH_SYNC_TOKEN }}`,
+   `VITE_GH_BRANCH=main` as compile-time constants baked into the public JS bundle.
+   **Changing the secret has no effect until the site is rebuilt.**
+2. **Module load** (`githubSync.js:6-11`): reads those into `REPO`/`TOKEN`/`BRANCH`
+   (`BRANCH` defaults to `"main"`). `isSyncEnabled()` = `Boolean(REPO && TOKEN)` —
+   if either is empty, sync is a silent permanent no-op for that page load.
+3. **Runtime** (`App.jsx`): every 90s (`setInterval`), on `beforeunload`, and once
+   when `stage === "done"`, calls `commitSelectedAnswers({ sessionId, rows, lastSha, lastContent })`.
+4. **commitSelectedAnswers** (`githubSync.js:83-114`):
+   - Serializes rows to CSV (Papaparse + BOM), skips if byte-identical to last sync.
+   - `ensureBranch()` once per session (creates `BRANCH` off `main` if it doesn't exist).
+   - `PUT /repos/{REPO}/contents/jobs/{sessionId}/selected_answers.csv` with
+     `{ message, content: base64(csv), branch, sha?: lastSha }` — `sha` only
+     included when updating an existing file (GitHub Contents API requirement).
+   - Non-OK response → `throw`. Caller only does `console.warn` — **no retry,
+     no UI indicator, no persisted log.** This is why breakage can go unnoticed
+     for weeks.
+5. `.github/workflows/deploy.yml:6-9` sets `paths-ignore: jobs/**` so the
+   sync's own data commits never trigger a rebuild. A rotated/expired
+   `GH_SYNC_TOKEN` therefore stays silently stale in the deployed bundle
+   until some *non*-`jobs/**` commit (or manual `workflow_dispatch`) forces
+   a rebuild.
+
+## Config inputs
+
+| Var | Read in | Set by |
+|---|---|---|
+| `VITE_GH_REPO` | `githubSync.js:6`, `githubJobs.js:8` | `deploy.yml:41` (`github.repository`) |
+| `VITE_GH_TOKEN` | `githubSync.js:7`, `githubJobs.js:10` | `deploy.yml:42` ← repo secret `GH_SYNC_TOKEN` |
+| `VITE_GH_BRANCH` | `githubSync.js:11` | `deploy.yml:43`, hardcoded `main` |
+
+No local `.env` exists — `npm run dev` always runs with sync disabled (by design).
+
+## Known failure modes (ranked)
+
+1. **`GH_SYNC_TOKEN` expired/revoked** → every PUT 401s, swallowed by `console.warn`
+   in `App.jsx`. Nothing server-side records this.
+2. **Stale deployed bundle** — because of `paths-ignore: jobs/**`, a token
+   rotation doesn't take effect until you manually trigger `deploy.yml`.
+3. **Token lacks write access** — `githubJobs.js` has a hardcoded repo fallback
+   for *reading*; `githubSync.js` has no such fallback for *writing*, so a repo
+   rename/typo breaks writing even if reading still appears to work.
+4. **Branch protection on `main`** → direct Contents API PUT returns 403, same
+   silent-warn path.
+5. **Stale cached `sha`** → 409/422 conflict; `lastSha` only updates on success,
+   so a bad cache keeps failing every retry for the rest of the session.
+6. **Security note**: the PAT is shipped inside a public JS bundle — anyone can
+   extract it with write access to this repo. Known accepted risk, not yet
+   mitigated (e.g. via a serverless proxy).
+
+## Incident log
+
+**2026-10-04**: Sync had been broken since ~2026-07-30 (last successful data
+commit `9906d8a`) due to an expired PAT behind `GH_SYNC_TOKEN`. Root-caused via
+browser 401 on the Contents API PUT. Fixed by:
+1. Generating a new **classic PAT** scoped to `public_repo` only (repo is
+   public; `public_repo` is sufficient and narrower than full `repo`), stored
+   locally in `~/.zshrc` as `GITHUB_NEPALI_PROVERB_VALIDATOR_PAT`.
+2. `gh secret set GH_SYNC_TOKEN --repo cluelesprogrammer/nepali-proverb-validator --body "$GITHUB_NEPALI_PROVERB_VALIDATOR_PAT"`.
+3. `gh workflow run deploy.yml --repo cluelesprogrammer/nepali-proverb-validator --ref main`
+   to force a rebuild (data-only commits can't trigger this, see failure mode 2).
+4. Verified `permissions.push === true` on the token *before* using it — a
+   first regenerated token had `pull`-only access and would have just traded
+   a 401 for a 403.
+
+**Runbook for next time sync silently stops:**
+1. Open the live Pages site with DevTools open, confirm an answer, wait 90s,
+   check the `PUT .../contents/jobs/...` request status (401 = token, 403 =
+   permissions/branch-protection, 409/422 = stale sha).
+2. If 401: generate a new token (see scopes above), verify `push: true` via
+   `gh api repos/{owner}/{repo} --jq .permissions` *before* installing it.
+3. `gh secret set GH_SYNC_TOKEN ...` then `gh workflow run deploy.yml ...`
+   — a secret update alone does **not** redeploy the live bundle.
