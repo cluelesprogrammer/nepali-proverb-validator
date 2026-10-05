@@ -12,11 +12,11 @@ import {
   isSyncEnabled,
 } from "./utils/githubSync.js";
 // The dataset ships with the app; it is read from the repo at build time so the
-// reviewer does not have to upload anything. This is finaldataset.csv with the
-// rows already reviewed in N_200_balanced.csv removed (see
-// scripts/build_filtered_dataset.py), so proverbs already validated in that
-// round are never shown again.
-import datasetCsv from "../csv_files/finaldataset_filtered.csv?raw";
+// reviewer does not have to upload anything. This is a 150-per-category sample
+// (see scripts/build_150_per_category.py) drawn from finaldataset_filtered_v2.csv,
+// i.e. finaldataset.csv with the already-reviewed N_200_balanced.csv and
+// balanced_dataset.csv rows excluded (Hard Work/Wisdom restored to full).
+import datasetCsv from "../csv_files/balanced_150_dataset.csv?raw";
 
 const SAVE_INTERVAL_MS = 90 * 1000;
 
