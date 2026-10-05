@@ -21,13 +21,19 @@ Contents API.
    (`BRANCH` defaults to `"main"`). `isSyncEnabled()` = `Boolean(REPO && TOKEN)` —
    if either is empty, sync is a silent permanent no-op for that page load.
 3. **Runtime** (`App.jsx`): every 90s (`setInterval`), on `beforeunload`, and once
-   when `stage === "done"`, calls `commitSelectedAnswers({ sessionId, rows, lastSha, lastContent })`.
-4. **commitSelectedAnswers** (`githubSync.js:83-114`):
-   - Serializes rows to CSV (Papaparse + BOM), skips if byte-identical to last sync.
+   when `stage === "done"`, calls `commitSelectedAnswers({ sessionId, rows, lastSha, lastContent })`
+   **and** `commitRejectedAnswers({ sessionId, rows, lastSha, lastContent })` (declined rows,
+   tracked in `declined` state) back-to-back, each with its own cached `{sha, content}` ref
+   (`syncStateRef` / `rejectSyncStateRef`) so a failure in one does not block the other.
+4. **commitSelectedAnswers / commitRejectedAnswers** (`githubSync.js`): both are thin wrappers
+   around a shared `commitRowsToJobFile({ sessionId, rows, filename, lastSha, lastContent })`:
+   - Serializes rows to CSV (Papaparse + BOM, identical schema for both files), skips if
+     byte-identical to last sync.
    - `ensureBranch()` once per session (creates `BRANCH` off `main` if it doesn't exist).
-   - `PUT /repos/{REPO}/contents/jobs/{sessionId}/selected_answers.csv` with
+   - `PUT /repos/{REPO}/contents/jobs/{sessionId}/{filename}` with
      `{ message, content: base64(csv), branch, sha?: lastSha }` — `sha` only
      included when updating an existing file (GitHub Contents API requirement).
+     `filename` is `selected_answers.csv` for confirmed rows, `rejected.csv` for declined rows.
    - Non-OK response → `throw`. Caller only does `console.warn` — **no retry,
      no UI indicator, no persisted log.** This is why breakage can go unnoticed
      for weeks.

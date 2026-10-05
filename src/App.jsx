@@ -6,12 +6,17 @@ import CategoryProgress from "./components/CategoryProgress.jsx";
 import Summary from "./components/Summary.jsx";
 import JobsViewer from "./components/JobsViewer.jsx";
 import { parseProverbCsv, shuffle } from "./utils/parseCsv.js";
-import { commitSelectedAnswers, isSyncEnabled } from "./utils/githubSync.js";
+import {
+  commitSelectedAnswers,
+  commitRejectedAnswers,
+  isSyncEnabled,
+} from "./utils/githubSync.js";
 // The dataset ships with the app; it is read from the repo at build time so the
-// reviewer does not have to upload anything. We use a category-balanced subset
-// (150 proverbs per category, plus all of the small Nature and Environment set)
-// rather than the full finaldataset.
-import datasetCsv from "../csv_files/balanced_dataset.csv?raw";
+// reviewer does not have to upload anything. This is finaldataset.csv with the
+// rows already reviewed in N_200_balanced.csv removed (see
+// scripts/build_filtered_dataset.py), so proverbs already validated in that
+// round are never shown again.
+import datasetCsv from "../csv_files/finaldataset_filtered.csv?raw";
 
 const SAVE_INTERVAL_MS = 90 * 1000;
 
@@ -38,7 +43,7 @@ export default function App() {
   const [rows, setRows] = useState([]);
   const [index, setIndex] = useState(0);
   const [confirmed, setConfirmed] = useState([]);
-  const [declinedKeys, setDeclinedKeys] = useState([]);
+  const [declined, setDeclined] = useState([]);
   const [warnings, setWarnings] = useState([]);
   const [loadError, setLoadError] = useState(null);
 
@@ -58,13 +63,16 @@ export default function App() {
     setView(next);
   }
 
-  // --- Background sync of confirmed rows to GitHub every 90s ---
+  // --- Background sync of confirmed + declined rows to GitHub every 90s ---
   const sessionIdRef = useRef(null);
   const confirmedRef = useRef(confirmed);
+  const declinedRef = useRef(declined);
   const syncStateRef = useRef({ sha: undefined, content: undefined });
+  const rejectSyncStateRef = useRef({ sha: undefined, content: undefined });
   const syncingRef = useRef(false);
 
   confirmedRef.current = confirmed;
+  declinedRef.current = declined;
 
   useEffect(() => {
     if (!isSyncEnabled()) return;
@@ -83,6 +91,17 @@ export default function App() {
         syncStateRef.current = next;
       } catch (err) {
         console.warn("Selected-answers sync failed:", err);
+      }
+      try {
+        const nextReject = await commitRejectedAnswers({
+          sessionId: sessionIdRef.current,
+          rows: declinedRef.current,
+          lastSha: rejectSyncStateRef.current.sha,
+          lastContent: rejectSyncStateRef.current.content,
+        });
+        rejectSyncStateRef.current = nextReject;
+      } catch (err) {
+        console.warn("Rejected-answers sync failed:", err);
       } finally {
         syncingRef.current = false;
       }
@@ -105,8 +124,9 @@ export default function App() {
   // Trigger a save as soon as the review is finished.
   useEffect(() => {
     if (stage !== "done" || !isSyncEnabled()) return;
+    const sessionId = sessionIdRef.current ?? getSessionId();
     commitSelectedAnswers({
-      sessionId: sessionIdRef.current ?? getSessionId(),
+      sessionId,
       rows: confirmedRef.current,
       lastSha: syncStateRef.current.sha,
       lastContent: syncStateRef.current.content,
@@ -115,6 +135,16 @@ export default function App() {
         syncStateRef.current = next;
       })
       .catch((err) => console.warn("Selected-answers sync failed:", err));
+    commitRejectedAnswers({
+      sessionId,
+      rows: declinedRef.current,
+      lastSha: rejectSyncStateRef.current.sha,
+      lastContent: rejectSyncStateRef.current.content,
+    })
+      .then((next) => {
+        rejectSyncStateRef.current = next;
+      })
+      .catch((err) => console.warn("Rejected-answers sync failed:", err));
   }, [stage]);
 
   useEffect(() => {
@@ -135,7 +165,7 @@ export default function App() {
       setWarnings(errors ?? []);
       setIndex(0);
       setConfirmed([]);
-      setDeclinedKeys([]);
+      setDeclined([]);
       setStage("review");
     })();
     return () => {
@@ -155,14 +185,14 @@ export default function App() {
     setConfirmed((prev) =>
       prev.some((r) => r._key === current._key) ? prev : [...prev, current]
     );
-    setDeclinedKeys((prev) => prev.filter((k) => k !== current._key));
+    setDeclined((prev) => prev.filter((r) => r._key !== current._key));
     advance();
   }
 
   function handleDecline() {
     setConfirmed((prev) => prev.filter((r) => r._key !== current._key));
-    setDeclinedKeys((prev) =>
-      prev.includes(current._key) ? prev : [...prev, current._key]
+    setDeclined((prev) =>
+      prev.some((r) => r._key === current._key) ? prev : [...prev, current]
     );
     advance();
   }
@@ -172,7 +202,7 @@ export default function App() {
     const prevRow = rows[index - 1];
     // Clear the previous decision so it can be re-reviewed.
     setConfirmed((prev) => prev.filter((r) => r._key !== prevRow._key));
-    setDeclinedKeys((prev) => prev.filter((k) => k !== prevRow._key));
+    setDeclined((prev) => prev.filter((r) => r._key !== prevRow._key));
     setIndex(index - 1);
   }
 
@@ -184,7 +214,7 @@ export default function App() {
     if (rows.length > 0) setRows((prev) => shuffle(prev));
     setIndex(0);
     setConfirmed([]);
-    setDeclinedKeys([]);
+    setDeclined([]);
     setStage(rows.length > 0 ? "review" : "loading");
   }
 
@@ -278,7 +308,7 @@ export default function App() {
     return (
       <Summary
         confirmed={confirmed}
-        declinedCount={declinedKeys.length}
+        declinedCount={declined.length}
         total={rows.length}
         categoryStats={categoryStats}
         onRemove={handleRemove}

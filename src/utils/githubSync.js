@@ -77,15 +77,11 @@ async function ensureBranch() {
   branchEnsured = true;
 }
 
-// Commit the confirmed rows to jobs/{sessionId}/selected_answers.csv on the
-// sync branch (main by default). Returns { sha, content } to cache for the next call so we can
-// (a) skip unchanged saves and (b) supply the sha required to update the file.
-export async function commitSelectedAnswers({
-  sessionId,
-  rows,
-  lastSha,
-  lastContent,
-}) {
+// Shared implementation for committing a set of rows to a given filename under
+// jobs/{sessionId}/ on the sync branch (main by default). Returns { sha, content }
+// to cache for the next call so we can (a) skip unchanged saves and (b) supply
+// the sha required to update the file.
+async function commitRowsToJobFile({ sessionId, rows, filename, lastSha, lastContent }) {
   if (!isSyncEnabled()) return { sha: lastSha, content: lastContent };
   if (!rows || rows.length === 0) return { sha: lastSha, content: lastContent };
 
@@ -94,7 +90,7 @@ export async function commitSelectedAnswers({
 
   await ensureBranch();
 
-  const path = `jobs/${sessionId}/selected_answers.csv`;
+  const path = `jobs/${sessionId}/${filename}`;
   const body = {
     message: `chore(data): session ${sessionId} @ ${new Date().toISOString()}`,
     content: toBase64Utf8(content),
@@ -111,4 +107,27 @@ export async function commitSelectedAnswers({
   }
   const json = await res.json();
   return { sha: json.content?.sha ?? lastSha, content };
+}
+
+// Commit the confirmed rows to jobs/{sessionId}/selected_answers.csv.
+export async function commitSelectedAnswers({ sessionId, rows, lastSha, lastContent }) {
+  return commitRowsToJobFile({
+    sessionId,
+    rows,
+    filename: "selected_answers.csv",
+    lastSha,
+    lastContent,
+  });
+}
+
+// Commit the declined/rejected rows to jobs/{sessionId}/rejected.csv, using the
+// exact same CSV schema as the selected answers file.
+export async function commitRejectedAnswers({ sessionId, rows, lastSha, lastContent }) {
+  return commitRowsToJobFile({
+    sessionId,
+    rows,
+    filename: "rejected.csv",
+    lastSha,
+    lastContent,
+  });
 }
